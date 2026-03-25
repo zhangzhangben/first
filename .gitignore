@@ -1,0 +1,28 @@
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Local config / cache
+.claude/
+
+# Weights and checkpoints
+cfg.yaml
+*.pth
+*.pkl
+weights/*
+!weights/.gitkeep
+
+# Generated experiment outputs
+exp_refine_clean_v2/
+output/
+output1/
+output_docker/
