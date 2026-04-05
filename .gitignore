@@ -32,6 +32,7 @@ booster_gt/
 output_booster_eval_paper_q416_v1/
 output_booster_submit_paper_q416_v1/
 output_booster_submit_paper_q416_v1_args.yaml
+assets/
 
 # Temporary rich text notes
 README_Booster.rtf
