@@ -26,3 +26,12 @@ exp_refine_clean_v2/
 output/
 output1/
 output_docker/
+
+# Booster dataset and generated artifacts
+booster_gt/
+output_booster_eval_paper_q416_v1/
+output_booster_submit_paper_q416_v1/
+output_booster_submit_paper_q416_v1_args.yaml
+
+# Temporary rich text notes
+README_Booster.rtf
