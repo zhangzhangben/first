@@ -36,3 +36,15 @@ assets/
 
 # Temporary rich text notes
 README_Booster.rtf
+
+# Local paper PDFs
+booster2022.pdf
+booster2024.pdf
+fastfoundationstereo.pdf
+foundationstereo.pdf
+Li_LoS_Local_Structure-Guided_Stereo_Matching_CVPR_2024_paper.pdf
+Li_Global_Regulation_and_Excitation_via_Attention_Tuning_for_Stereo_Matching_ICCV_2025_paper.pdf
+Xu_Iterative_Geometry_Encoding_Volume_for_Stereo_Matching_CVPR_2023_paper.pdf
+IGEV++.pdf
+output_booster_eval_uag_off_v1/
+paper/*.pdf

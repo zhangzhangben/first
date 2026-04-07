@@ -50,6 +50,10 @@ def parse_args():
   parser.add_argument("--valid_iters", default=None, type=int)
   parser.add_argument("--max_disp", default=None, type=int)
   parser.add_argument("--low_memory", default=None, type=int)
+  parser.add_argument('--use_uncertainty_update_gate', default=None, type=int)
+  parser.add_argument('--uncertainty_gate_scale', default=None, type=float)
+  parser.add_argument('--uncertainty_gate_bias', default=None, type=float)
+  parser.add_argument('--uncertainty_gate_hidden_dim', default=None, type=int)
   parser.add_argument("--scene_names", nargs="+", default=None)
   parser.add_argument("--max_samples_per_scene", default=None, type=int)
   return parser.parse_args()
@@ -233,6 +237,14 @@ def main():
   model.args.valid_iters = args.valid_iters
   model.args.max_disp = args.max_disp
   model.args.low_memory = bool(args.low_memory)
+  if args.use_uncertainty_update_gate is not None:
+    model.args.use_uncertainty_update_gate = bool(args.use_uncertainty_update_gate)
+  if args.uncertainty_gate_scale is not None:
+    model.args.uncertainty_gate_scale = args.uncertainty_gate_scale
+  if args.uncertainty_gate_bias is not None:
+    model.args.uncertainty_gate_bias = args.uncertainty_gate_bias
+  if args.uncertainty_gate_hidden_dim is not None:
+    model.args.uncertainty_gate_hidden_dim = args.uncertainty_gate_hidden_dim
   model.cuda().eval()
 
   total_samples = 0

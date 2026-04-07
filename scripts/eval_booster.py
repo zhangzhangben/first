@@ -53,6 +53,10 @@ def parse_args():
   parser.add_argument("--valid_iters", default=None, type=int)
   parser.add_argument("--max_disp", default=None, type=int)
   parser.add_argument("--low_memory", default=None, type=int)
+  parser.add_argument('--use_uncertainty_update_gate', default=None, type=int)
+  parser.add_argument('--uncertainty_gate_scale', default=None, type=float)
+  parser.add_argument('--uncertainty_gate_bias', default=None, type=float)
+  parser.add_argument('--uncertainty_gate_hidden_dim', default=None, type=int)
   parser.add_argument("--class_ids", nargs="+", default=[0, 1, 2, 3], type=int)
   parser.add_argument("--scene_names", nargs="+", default=None)
   parser.add_argument("--max_samples_per_scene", default=None, type=int)
@@ -162,6 +166,14 @@ def load_model_and_cfg(model_dir, cli_args):
       model.args.max_disp = cli_args.max_disp
     if cli_args.low_memory is not None:
       model.args.low_memory = cli_args.low_memory
+    if cli_args.use_uncertainty_update_gate is not None:
+      model.args.use_uncertainty_update_gate = bool(cli_args.use_uncertainty_update_gate)
+    if cli_args.uncertainty_gate_scale is not None:
+      model.args.uncertainty_gate_scale = cli_args.uncertainty_gate_scale
+    if cli_args.uncertainty_gate_bias is not None:
+      model.args.uncertainty_gate_bias = cli_args.uncertainty_gate_bias
+    if cli_args.uncertainty_gate_hidden_dim is not None:
+      model.args.uncertainty_gate_hidden_dim = cli_args.uncertainty_gate_hidden_dim
   else:
     cfg_path = os.path.join(os.path.dirname(model_dir), "cfg.yaml")
     with open(cfg_path, "r") as f:

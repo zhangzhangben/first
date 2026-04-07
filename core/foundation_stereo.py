@@ -38,6 +38,14 @@ def normalize_image(img):
     return (img/255.0 - mean) / std
 
 
+def _cfg_get(cfg, key, default):
+    if cfg is None:
+        return default
+    if hasattr(cfg, 'get'):
+        return cfg.get(key, default)
+    return getattr(cfg, key, default)
+
+
 class hourglass(nn.Module):
     def __init__(self, cfg, in_channels, feat_dims=None):
         super().__init__()
@@ -188,8 +196,17 @@ class FastFoundationStereo(nn.Module):
     return up_disp.to(self.dtype)
 
 
+  def _sync_runtime_update_flags(self):
+    if not hasattr(self, 'update_block') or not hasattr(self, 'args'):
+      return
+    self.update_block.use_uncertainty_update_gate = bool(_cfg_get(self.args, 'use_uncertainty_update_gate', False))
+    self.update_block.uncertainty_gate_scale = float(_cfg_get(self.args, 'uncertainty_gate_scale', 1.0))
+    self.update_block.uncertainty_gate_bias = float(_cfg_get(self.args, 'uncertainty_gate_bias', 0.0))
+    self.update_block.uncertainty_gate_hidden_dim = int(_cfg_get(self.args, 'uncertainty_gate_hidden_dim', 64))
+
   def forward(self, image1, image2, iters=12, test_mode=False, low_memory=False, init_disp=None, profile=False, optimize_build_volume='pytorch1'):
     """ Estimate disparity between pair of frames """
+    self._sync_runtime_update_flags()
     B,C,H,W = image1.shape
     low_memory = low_memory or (self.args.get('low_memory', False))
     image1 = normalize_image(image1)
