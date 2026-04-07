@@ -20,6 +20,10 @@ cfg.yaml
 *.pkl
 weights/*
 !weights/.gitkeep
+!weights/23-36-37/
+!weights/23-36-37/cfg.yaml
+!weights/23-36-37/adapter_best.pth
+!weights/23-36-37/model_best_bp2_serialize.pth
 
 # Generated experiment outputs
 exp_refine_clean_v2/
@@ -32,7 +36,6 @@ booster_gt/
 output_booster_eval_paper_q416_v1/
 output_booster_submit_paper_q416_v1/
 output_booster_submit_paper_q416_v1_args.yaml
-assets/
 
 # Temporary rich text notes
 README_Booster.rtf

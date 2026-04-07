@@ -204,6 +204,24 @@ class FastFoundationStereo(nn.Module):
     self.update_block.uncertainty_gate_bias = float(_cfg_get(self.args, 'uncertainty_gate_bias', 0.0))
     self.update_block.uncertainty_gate_hidden_dim = int(_cfg_get(self.args, 'uncertainty_gate_hidden_dim', 64))
 
+  def materialize_uncertainty_update_gate(self):
+    self._sync_runtime_update_flags()
+    if not bool(_cfg_get(self.args, 'use_uncertainty_update_gate', False)):
+      return None
+    corr_channels = self.args.corr_levels * (2 * self.args.corr_radius + 1) * (self.volume_dim + 1)
+    gate = self.update_block._ensure_uncertainty_gate(torch.empty(1, corr_channels, 1, 1, device=self.dx.device, dtype=self.dtype))
+    return gate
+
+  def freeze_all_but_uncertainty_gate(self):
+    gate = self.materialize_uncertainty_update_gate()
+    if gate is None:
+      raise RuntimeError('Uncertainty update gate is disabled, cannot freeze around it.')
+    for param in self.parameters():
+      param.requires_grad = False
+    for param in gate.parameters():
+      param.requires_grad = True
+    return gate
+
   def forward(self, image1, image2, iters=12, test_mode=False, low_memory=False, init_disp=None, profile=False, optimize_build_volume='pytorch1'):
     """ Estimate disparity between pair of frames """
     self._sync_runtime_update_flags()
