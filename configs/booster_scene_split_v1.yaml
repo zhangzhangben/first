@@ -1,0 +1,49 @@
+split_name: booster_scene_split_v1
+split_strategy: scene_level_holdout
+notes:
+- Validation split is scene-level to avoid train/val leakage across samples from the
+  same scene.
+- Validation scenes intentionally include reflective, transparent, and texture-poor
+  hard cases.
+- This split is for local ablation only and must not be confused with the official
+  Booster hidden test benchmark.
+train_scenes:
+- Bathroom
+- Bedroom
+- Bottle
+- Bottle1
+- Bottles1
+- Bucket
+- Canteen
+- Case
+- CashBox
+- CoffeeMaker
+- Cooker1
+- Cosmetics
+- DogHouse
+- Door
+- ExtractorFan
+- Fridge
+- Lunch
+- Microwave
+- Moka
+- Moka1
+- OilCan
+- Oven1
+- Pots1
+- Shower
+- Sink
+- TV1
+- TV2
+- Toilet
+- Vodka
+- Washer
+val_scenes:
+- Mirror
+- Mouthwash
+- Tablet
+- TV
+- BottledWater
+- Oven2
+- Motorcycle
+- SoapDishes
