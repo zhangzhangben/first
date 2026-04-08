@@ -260,6 +260,23 @@ Files not central to the current research result:
 - do **not** `git add` `exp_*` or `output_*`
 - `my_skill/` should also not be added unless explicitly desired
 
+## End-of-Day Repo Status
+
+The code state described in this handoff was committed and pushed.
+
+- branch: `codex/booster-refine-prep`
+- pushed commit: `e2229d178def78406d3fb1975eb0ea1d9b96324b`
+- commit message: `Add LoS-lite Booster training pipeline`
+
+Important local leftovers that were intentionally **not** part of that commit:
+
+- `scripts/run_demo.py`
+- `scripts/run_demo_tensorrt.py`
+- `configs/booster_scene_split_smoke_v1.yaml`
+- `my_skill/`
+
+These are not part of the current main research line and should only be touched if explicitly needed.
+
 ## Recommended Next Steps For The Next Codex
 
 ### 1. Run independent post-training evaluation for the new best checkpoints
@@ -274,6 +291,7 @@ Required targets:
 Goal:
 
 - produce new formal output directories comparable under the latest training recipe
+- verify whether the training-history `Bad2` ordering still holds under the full post-training evaluation path
 
 ### 2. Analyze why MAE improves but Bad2 still loses
 
