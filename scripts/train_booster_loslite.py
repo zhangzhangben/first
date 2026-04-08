@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader, Dataset
 code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(f"{code_dir}/../")
 
-from Utils import AMP_DTYPE, set_logging_format, set_seed
+import Utils as U
 from core.utils.utils import InputPadder
 from scripts.eval_booster import (
     apply_protocol_defaults,
@@ -63,12 +63,24 @@ def parse_args():
     parser.add_argument('--save_every', default=1, type=int)
     parser.add_argument('--resume', default=None, type=str)
     parser.add_argument('--seed', default=0, type=int)
-    parser.add_argument('--use_uncertainty_update_gate', default=1, type=int)
+    parser.add_argument('--amp_dtype', default='bf16', choices=['fp16', 'bf16', 'fp32'])
+    parser.add_argument('--use_uncertainty_update_gate', default=0, type=int)
     parser.add_argument('--uncertainty_gate_scale', default=1.0, type=float)
     parser.add_argument('--uncertainty_gate_bias', default=0.0, type=float)
     parser.add_argument('--uncertainty_gate_hidden_dim', default=64, type=int)
+    parser.add_argument('--use_loslite_refinement', default=1, type=int)
+    parser.add_argument('--loslite_hidden_dim', default=64, type=int)
+    parser.add_argument('--loslite_uncertainty_margin', default=0.1, type=float)
+    parser.add_argument('--loslite_propagation_blend', default=1.0, type=float)
+    parser.add_argument('--loslite_grad_scale', default=0.25, type=float)
+    parser.add_argument('--loslite_offset_scale', default=0.25, type=float)
+    parser.add_argument('--loslite_alpha_init', default=-5.0, type=float)
+    parser.add_argument('--loslite_max_residual', default=1.0, type=float)
+    parser.add_argument('--loslite_preserve_weight', default=0.02, type=float)
+    parser.add_argument('--sequence_loss_gamma', default=0.9, type=float)
     parser.add_argument('--train_setups', nargs='+', default=['balanced', 'unbalanced'])
     parser.add_argument('--val_setups', nargs='+', default=['balanced', 'unbalanced'])
+    parser.add_argument('--train_scope', default='loslite_only', choices=['loslite_only', 'all'])
     return parser.parse_args()
 
 
@@ -186,6 +198,17 @@ def masked_l1(pred, gt, valid):
     return (pred[valid] - gt[valid]).abs().mean()
 
 
+def masked_sequence_l1(preds, gt, valid, gamma=0.9):
+    if len(preds) == 0:
+        return gt.new_tensor(0.0)
+    loss = gt.new_tensor(0.0)
+    num_preds = len(preds)
+    for idx, pred in enumerate(preds):
+        weight = float(gamma) ** float(num_preds - idx - 1)
+        loss = loss + weight * masked_l1(pred, gt, valid)
+    return loss
+
+
 def compute_formal_booster_metrics(model, batch, args):
     setup = batch['setup']
     pred_disp, pred_meta = infer_single_pair(
@@ -236,7 +259,7 @@ def run_validation(model, loader, args):
             valid = batch['valid'].cuda(non_blocking=True).unsqueeze(0)
             padder = InputPadder(left.shape, divis_by=32, force_square=False)
             left, right = padder.pad(left, right)
-            with torch.amp.autocast('cuda', enabled=True, dtype=AMP_DTYPE):
+            with torch.amp.autocast('cuda', enabled=bool(args.amp_enabled), dtype=U.AMP_DTYPE):
                 pred = model.forward(left, right, iters=args.valid_iters, test_mode=True, low_memory=bool(args.low_memory), optimize_build_volume='pytorch1')
             pred = padder.unpad(pred.float())
             loss = masked_l1(pred, gt, valid)
@@ -269,9 +292,11 @@ def save_checkpoint(path, model, optimizer, scheduler, epoch, best_metric, args,
 
 def main():
     args = parse_args()
-    set_logging_format()
-    set_seed(args.seed)
+    U.set_logging_format()
+    U.set_seed(args.seed)
     torch.autograd.set_grad_enabled(True)
+    U.set_amp_dtype(args.amp_dtype)
+    args.amp_enabled = bool(args.amp_dtype != 'fp32')
 
     split_root = resolve_split_root(args.booster_root, 'train')
     train_scenes, val_scenes, split_cfg = load_split(args.split_file)
@@ -303,10 +328,19 @@ def main():
     args.valid_iters = int(model.args.valid_iters)
     model.args.max_disp = int(args.max_disp)
     model.args.low_memory = int(args.low_memory)
+    model.args.mixed_precision = bool(args.amp_enabled)
     model.args.use_uncertainty_update_gate = bool(args.use_uncertainty_update_gate)
     model.args.uncertainty_gate_scale = float(args.uncertainty_gate_scale)
     model.args.uncertainty_gate_bias = float(args.uncertainty_gate_bias)
     model.args.uncertainty_gate_hidden_dim = int(args.uncertainty_gate_hidden_dim)
+    model.args.use_loslite_refinement = bool(args.use_loslite_refinement)
+    model.args.loslite_hidden_dim = int(args.loslite_hidden_dim)
+    model.args.loslite_uncertainty_margin = float(args.loslite_uncertainty_margin)
+    model.args.loslite_propagation_blend = float(args.loslite_propagation_blend)
+    model.args.loslite_grad_scale = float(args.loslite_grad_scale)
+    model.args.loslite_offset_scale = float(args.loslite_offset_scale)
+    model.args.loslite_alpha_init = float(args.loslite_alpha_init)
+    model.args.loslite_max_residual = float(args.loslite_max_residual)
 
     os.makedirs(args.out_dir, exist_ok=True)
     with open(os.path.join(args.out_dir, 'train_args.yaml'), 'w') as f:
@@ -315,7 +349,13 @@ def main():
         yaml.safe_dump(split_cfg, f, sort_keys=False)
 
     model.cuda()
-    model.freeze_all_but_uncertainty_gate()
+    if args.train_scope == 'loslite_only':
+        model.freeze_all_but_loslite()
+    elif args.train_scope == 'all':
+        for param in model.parameters():
+            param.requires_grad = True
+    else:
+        raise ValueError(f'Unknown train_scope: {args.train_scope}')
 
     trainable = [(n, p.numel()) for n, p in model.named_parameters() if p.requires_grad]
     frozen = sum(p.numel() for p in model.parameters() if not p.requires_grad)
@@ -328,6 +368,8 @@ def main():
         json.dump(trainable_summary, f, indent=2)
     logging.info(f'train scenes: {train_scenes}')
     logging.info(f'val scenes: {val_scenes}')
+    logging.info(f'amp dtype: {args.amp_dtype} (enabled={args.amp_enabled})')
+    logging.info(f'sequence loss gamma: {args.sequence_loss_gamma}')
     logging.info(f'trainable params: {trainable_summary["trainable_num_params"]}')
     logging.info(f'frozen params: {trainable_summary["frozen_num_params"]}')
     logging.info(f'trainable param names: {trainable_summary["trainable_param_names"]}')
@@ -342,14 +384,18 @@ def main():
 
     optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(args.epochs, 1))
-    scaler = torch.amp.GradScaler('cuda', enabled=True)
+    scaler = torch.amp.GradScaler('cuda', enabled=bool(args.amp_enabled and U.AMP_DTYPE == torch.float16))
 
     start_epoch = 0
     best_metric = math.inf
     if args.resume:
         ckpt = torch.load(args.resume, map_location='cpu')
         model.load_state_dict(ckpt['model'], strict=False)
-        model.freeze_all_but_uncertainty_gate()
+        if args.train_scope == 'loslite_only':
+            model.freeze_all_but_loslite()
+        else:
+            for param in model.parameters():
+                param.requires_grad = True
         optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=args.lr, weight_decay=args.weight_decay)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(args.epochs, 1))
         optimizer.load_state_dict(ckpt['optimizer'])
@@ -362,6 +408,8 @@ def main():
     for epoch in range(start_epoch, args.epochs):
         model.train()
         epoch_loss = 0.0
+        epoch_disp_loss = 0.0
+        epoch_preserve = 0.0
         for step, batch in enumerate(train_loader, start=1):
             left = batch['left'].cuda(non_blocking=True).unsqueeze(0)
             right = batch['right'].cuda(non_blocking=True).unsqueeze(0)
@@ -371,25 +419,42 @@ def main():
             left, right = padder.pad(left, right)
 
             optimizer.zero_grad(set_to_none=True)
-            with torch.amp.autocast('cuda', enabled=True, dtype=AMP_DTYPE):
+            with torch.amp.autocast('cuda', enabled=bool(args.amp_enabled), dtype=U.AMP_DTYPE):
                 _, preds = model.forward(left, right, iters=args.valid_iters, test_mode=False, low_memory=bool(args.low_memory), optimize_build_volume='pytorch1')
-                pred = padder.unpad(preds[-1])
-                loss = masked_l1(pred, gt, valid)
+                preds = [padder.unpad(pred) for pred in preds]
+                disp_loss = masked_sequence_l1(preds, gt, valid, gamma=args.sequence_loss_gamma)
+                preserve_reg = getattr(model, 'last_loslite_regularizer', None)
+                if preserve_reg is None:
+                    preserve_reg = disp_loss.new_tensor(0.0)
+                loss = disp_loss + float(args.loslite_preserve_weight) * preserve_reg
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_([p for p in model.parameters() if p.requires_grad], args.grad_clip)
             scaler.step(optimizer)
             scaler.update()
             epoch_loss += float(loss.item())
+            epoch_disp_loss += float(disp_loss.item())
+            epoch_preserve += float(preserve_reg.item())
             if step % args.log_every == 0:
-                logging.info(f'epoch={epoch} step={step}/{len(train_loader)} loss={loss.item():.6f}')
+                logging.info(
+                    f'epoch={epoch} step={step}/{len(train_loader)} '
+                    f'loss={loss.item():.6f} disp_loss={disp_loss.item():.6f} '
+                    f'preserve_reg={preserve_reg.item():.6f}'
+                )
 
         scheduler.step()
         train_loss = epoch_loss / max(len(train_loader), 1)
+        train_disp_loss = epoch_disp_loss / max(len(train_loader), 1)
+        train_preserve_reg = epoch_preserve / max(len(train_loader), 1)
+        # Full-model finetuning can leave large cached allocations after training.
+        # Clear them before validation so the formal eval-style forward fits reliably.
+        torch.cuda.empty_cache()
         val_metrics = run_validation(model, val_loader, args)
         record = {
             'epoch': epoch,
             'train_loss': train_loss,
+            'train_disp_loss': train_disp_loss,
+            'train_preserve_reg': train_preserve_reg,
             'val_loss': val_metrics['loss'],
             'val_bad2': val_metrics['bad2'],
             'val_bad2_formal': val_metrics['bad2'],
@@ -400,7 +465,8 @@ def main():
         }
         history.append(record)
         logging.info(
-            f"epoch={epoch} train_loss={train_loss:.6f} val_loss={val_metrics['loss']:.6f} "
+            f"epoch={epoch} train_loss={train_loss:.6f} train_disp_loss={train_disp_loss:.6f} "
+            f"train_preserve_reg={train_preserve_reg:.6f} val_loss={val_metrics['loss']:.6f} "
             f"val_bad2_formal={val_metrics['bad2']:.4f} val_mae_formal={val_metrics['mae']:.6f} "
             f"metric_gt_resolution={args.benchmark_gt_resolution}"
         )

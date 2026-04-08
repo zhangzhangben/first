@@ -57,6 +57,12 @@ def parse_args():
   parser.add_argument('--uncertainty_gate_scale', default=None, type=float)
   parser.add_argument('--uncertainty_gate_bias', default=None, type=float)
   parser.add_argument('--uncertainty_gate_hidden_dim', default=None, type=int)
+  parser.add_argument('--use_loslite_refinement', default=None, type=int)
+  parser.add_argument('--loslite_hidden_dim', default=None, type=int)
+  parser.add_argument('--loslite_uncertainty_margin', default=None, type=float)
+  parser.add_argument('--loslite_propagation_blend', default=None, type=float)
+  parser.add_argument('--loslite_grad_scale', default=None, type=float)
+  parser.add_argument('--loslite_offset_scale', default=None, type=float)
   parser.add_argument("--class_ids", nargs="+", default=[0, 1, 2, 3], type=int)
   parser.add_argument("--scene_names", nargs="+", default=None)
   parser.add_argument("--max_samples_per_scene", default=None, type=int)
@@ -149,6 +155,25 @@ def apply_protocol_defaults(cfg):
   return cfg
 
 
+def load_serialized_cfg(model_dir, model=None):
+  cfg_path = os.path.join(os.path.dirname(model_dir), "cfg.yaml")
+  if os.path.isfile(cfg_path):
+    with open(cfg_path, "r") as f:
+      return yaml.safe_load(f) or {}
+
+  if model is not None and hasattr(model, "args") and model.args is not None:
+    if OmegaConf.is_config(model.args):
+      return OmegaConf.to_container(model.args, resolve=True)
+    if isinstance(model.args, dict):
+      return dict(model.args)
+    return {
+        k: v for k, v in vars(model.args).items()
+        if not k.startswith("_")
+    }
+
+  return {}
+
+
 def load_model_and_cfg(model_dir, cli_args):
   loaded = torch.load(model_dir, map_location="cpu", weights_only=False)
   if isinstance(loaded, dict):
@@ -174,10 +199,20 @@ def load_model_and_cfg(model_dir, cli_args):
       model.args.uncertainty_gate_bias = cli_args.uncertainty_gate_bias
     if cli_args.uncertainty_gate_hidden_dim is not None:
       model.args.uncertainty_gate_hidden_dim = cli_args.uncertainty_gate_hidden_dim
+    if cli_args.use_loslite_refinement is not None:
+      model.args.use_loslite_refinement = bool(cli_args.use_loslite_refinement)
+    if cli_args.loslite_hidden_dim is not None:
+      model.args.loslite_hidden_dim = cli_args.loslite_hidden_dim
+    if cli_args.loslite_uncertainty_margin is not None:
+      model.args.loslite_uncertainty_margin = cli_args.loslite_uncertainty_margin
+    if cli_args.loslite_propagation_blend is not None:
+      model.args.loslite_propagation_blend = cli_args.loslite_propagation_blend
+    if cli_args.loslite_grad_scale is not None:
+      model.args.loslite_grad_scale = cli_args.loslite_grad_scale
+    if cli_args.loslite_offset_scale is not None:
+      model.args.loslite_offset_scale = cli_args.loslite_offset_scale
   else:
-    cfg_path = os.path.join(os.path.dirname(model_dir), "cfg.yaml")
-    with open(cfg_path, "r") as f:
-      cfg = yaml.safe_load(f)
+    cfg = load_serialized_cfg(model_dir, model)
     cfg.setdefault("normalize", True)
     cfg.setdefault("corr_levels", 2)
     cfg.setdefault("corr_radius", 4)
@@ -191,8 +226,7 @@ def load_model_and_cfg(model_dir, cli_args):
       cfg["max_disp"] = cli_args.max_disp
     model.args = OmegaConf.create(cfg)
 
-  with open(f"{os.path.dirname(model_dir)}/cfg.yaml", "r") as f:
-    cfg = yaml.safe_load(f)
+  cfg = load_serialized_cfg(model_dir, model)
   for k, v in vars(cli_args).items():
     if k not in cfg or v is not None:
       cfg[k] = v

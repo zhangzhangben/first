@@ -33,6 +33,9 @@ output_docker/
 
 # Booster dataset and generated artifacts
 booster_gt/
+exp_booster_*/
+output_booster_eval_*/
+output_booster_submit_*/
 output_booster_eval_paper_q416_v1/
 output_booster_submit_paper_q416_v1/
 output_booster_submit_paper_q416_v1_args.yaml
