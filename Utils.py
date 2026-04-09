@@ -2,35 +2,12 @@ import os, sys, torch, imageio, logging, importlib, argparse
 import cv2
 import numpy as np
 import yaml
-
-
-def _get_open3d():
-  try:
-    import open3d as o3d
-    return o3d
-  except Exception:
-    return None
+try:
+  import open3d as o3d
+except:
+  o3d = None
 
 AMP_DTYPE = torch.float16
-
-
-def resolve_amp_dtype(dtype_name):
-  if isinstance(dtype_name, torch.dtype):
-    return dtype_name
-  name = str(dtype_name).lower()
-  if name == 'fp16':
-    return torch.float16
-  if name == 'bf16':
-    return torch.bfloat16
-  if name == 'fp32':
-    return torch.float32
-  raise ValueError(f'Unknown AMP dtype: {dtype_name}')
-
-
-def set_amp_dtype(dtype_name):
-  global AMP_DTYPE
-  AMP_DTYPE = resolve_amp_dtype(dtype_name)
-  return AMP_DTYPE
 
 def set_logging_format(level=logging.INFO):
   importlib.reload(logging)
@@ -49,9 +26,6 @@ def set_seed(random_seed):
 
 
 def toOpen3dCloud(points,colors=None,normals=None):
-  o3d = _get_open3d()
-  if o3d is None:
-    raise ImportError("open3d is not available in the current environment")
   cloud = o3d.geometry.PointCloud()
   cloud.points = o3d.utility.Vector3dVector(points.astype(np.float64))
   if colors is not None:

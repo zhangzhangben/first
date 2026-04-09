@@ -92,6 +92,9 @@ if __name__=="__main__":
     disp[invalid] = np.inf
 
   if args.get_pc:
+    o3d = _get_open3d()
+    if o3d is None:
+      raise ImportError('open3d is required for point cloud export but is not available')
     with open(args.intrinsic_file, 'r') as f:
       lines = f.readlines()
       K = np.array(list(map(float, lines[0].rstrip().split()))).astype(np.float32).reshape(3,3)

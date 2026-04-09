@@ -50,16 +50,6 @@ def parse_args():
   parser.add_argument("--valid_iters", default=None, type=int)
   parser.add_argument("--max_disp", default=None, type=int)
   parser.add_argument("--low_memory", default=None, type=int)
-  parser.add_argument('--use_uncertainty_update_gate', default=None, type=int)
-  parser.add_argument('--uncertainty_gate_scale', default=None, type=float)
-  parser.add_argument('--uncertainty_gate_bias', default=None, type=float)
-  parser.add_argument('--uncertainty_gate_hidden_dim', default=None, type=int)
-  parser.add_argument('--use_loslite_refinement', default=None, type=int)
-  parser.add_argument('--loslite_hidden_dim', default=None, type=int)
-  parser.add_argument('--loslite_uncertainty_margin', default=None, type=float)
-  parser.add_argument('--loslite_propagation_blend', default=None, type=float)
-  parser.add_argument('--loslite_grad_scale', default=None, type=float)
-  parser.add_argument('--loslite_offset_scale', default=None, type=float)
   parser.add_argument("--scene_names", nargs="+", default=None)
   parser.add_argument("--max_samples_per_scene", default=None, type=int)
   return parser.parse_args()
@@ -125,25 +115,6 @@ def apply_protocol_defaults(cfg):
   if cfg.get("max_disp") is None and protocol == "booster_q":
     cfg["max_disp"] = 192
   return cfg
-
-
-def load_serialized_cfg(model_dir, model=None):
-  cfg_path = os.path.join(os.path.dirname(model_dir), "cfg.yaml")
-  if os.path.isfile(cfg_path):
-    with open(cfg_path, "r") as f:
-      return yaml.safe_load(f) or {}
-
-  if model is not None and hasattr(model, "args") and model.args is not None:
-    if OmegaConf.is_config(model.args):
-      return OmegaConf.to_container(model.args, resolve=True)
-    if isinstance(model.args, dict):
-      return dict(model.args)
-    return {
-        k: v for k, v in vars(model.args).items()
-        if not k.startswith("_")
-    }
-
-  return {}
 
 
 def resize_pair(img0, img1, scale_factor):
@@ -225,8 +196,8 @@ def main():
   set_seed(0)
   torch.autograd.set_grad_enabled(False)
 
-  model = torch.load(cli_args.model_dir, map_location="cpu", weights_only=False)
-  cfg = load_serialized_cfg(cli_args.model_dir, model)
+  with open(f"{os.path.dirname(cli_args.model_dir)}/cfg.yaml", "r") as ff:
+    cfg = yaml.safe_load(ff)
 
   for k, v in vars(cli_args).items():
     if k not in cfg or v is not None:
@@ -258,31 +229,10 @@ def main():
   logging.info(f"match_unbalanced_left_to_right: {args.match_unbalanced_left_to_right}")
   logging.info(f"out_dir: {args.out_dir}")
 
-  if not hasattr(model, "args") or model.args is None:
-    model.args = OmegaConf.create(cfg)
+  model = torch.load(args.model_dir, map_location="cpu", weights_only=False)
   model.args.valid_iters = args.valid_iters
   model.args.max_disp = args.max_disp
   model.args.low_memory = bool(args.low_memory)
-  if args.use_uncertainty_update_gate is not None:
-    model.args.use_uncertainty_update_gate = bool(args.use_uncertainty_update_gate)
-  if args.uncertainty_gate_scale is not None:
-    model.args.uncertainty_gate_scale = args.uncertainty_gate_scale
-  if args.uncertainty_gate_bias is not None:
-    model.args.uncertainty_gate_bias = args.uncertainty_gate_bias
-  if args.uncertainty_gate_hidden_dim is not None:
-    model.args.uncertainty_gate_hidden_dim = args.uncertainty_gate_hidden_dim
-  if args.use_loslite_refinement is not None:
-    model.args.use_loslite_refinement = bool(args.use_loslite_refinement)
-  if args.loslite_hidden_dim is not None:
-    model.args.loslite_hidden_dim = args.loslite_hidden_dim
-  if args.loslite_uncertainty_margin is not None:
-    model.args.loslite_uncertainty_margin = args.loslite_uncertainty_margin
-  if args.loslite_propagation_blend is not None:
-    model.args.loslite_propagation_blend = args.loslite_propagation_blend
-  if args.loslite_grad_scale is not None:
-    model.args.loslite_grad_scale = args.loslite_grad_scale
-  if args.loslite_offset_scale is not None:
-    model.args.loslite_offset_scale = args.loslite_offset_scale
   model.cuda().eval()
 
   total_samples = 0

@@ -194,67 +194,8 @@ class FastFoundationStereo(nn.Module):
       spx_pred = F.softmax(spx_pred, 1)
       up_disp = context_upsample(disp*4., spx_pred).unsqueeze(1)
     return up_disp.to(self.dtype)
-
-
-  def _sync_runtime_update_flags(self):
-    if not hasattr(self, 'update_block') or not hasattr(self, 'args'):
-      return
-    self.update_block.use_uncertainty_update_gate = bool(_cfg_get(self.args, 'use_uncertainty_update_gate', False))
-    self.update_block.uncertainty_gate_scale = float(_cfg_get(self.args, 'uncertainty_gate_scale', 1.0))
-    self.update_block.uncertainty_gate_bias = float(_cfg_get(self.args, 'uncertainty_gate_bias', 0.0))
-    self.update_block.uncertainty_gate_hidden_dim = int(_cfg_get(self.args, 'uncertainty_gate_hidden_dim', 64))
-    self.update_block.use_loslite_refinement = bool(_cfg_get(self.args, 'use_loslite_refinement', False))
-    self.update_block.loslite_hidden_dim = int(_cfg_get(self.args, 'loslite_hidden_dim', 64))
-    self.update_block.loslite_uncertainty_margin = float(_cfg_get(self.args, 'loslite_uncertainty_margin', 0.1))
-    self.update_block.loslite_propagation_blend = float(_cfg_get(self.args, 'loslite_propagation_blend', 1.0))
-    self.update_block.loslite_grad_scale = float(_cfg_get(self.args, 'loslite_grad_scale', 0.25))
-    self.update_block.loslite_offset_scale = float(_cfg_get(self.args, 'loslite_offset_scale', 0.25))
-    self.update_block.loslite_alpha_init = float(_cfg_get(self.args, 'loslite_alpha_init', -5.0))
-    self.update_block.loslite_max_residual = float(_cfg_get(self.args, 'loslite_max_residual', 1.0))
-
-  def materialize_uncertainty_update_gate(self):
-    self._sync_runtime_update_flags()
-    if not bool(_cfg_get(self.args, 'use_uncertainty_update_gate', False)):
-      return None
-    corr_channels = self.args.corr_levels * (2 * self.args.corr_radius + 1) * (self.volume_dim + 1)
-    gate = self.update_block._ensure_uncertainty_gate(torch.empty(1, corr_channels, 1, 1, device=self.dx.device, dtype=self.dtype))
-    return gate
-
-  def materialize_loslite_module(self):
-    self._sync_runtime_update_flags()
-    if not bool(_cfg_get(self.args, 'use_loslite_refinement', False)):
-      return None
-    corr_channels = self.args.corr_levels * (2 * self.args.corr_radius + 1) * (self.volume_dim + 1)
-    dummy_corr = torch.empty(1, corr_channels, 1, 1, device=self.dx.device, dtype=self.dtype)
-    motion_channels = int(self.update_block.encoder.conv.out_channels) + 1
-    context_channels = int(self.update_block.gru04.conv0[0].in_channels) - motion_channels
-    dummy_context = torch.empty(1, context_channels, 1, 1, device=self.dx.device, dtype=self.dtype)
-    loslite_module = self.update_block._ensure_loslite_module(dummy_corr, [dummy_context])
-    return loslite_module
-
-  def freeze_all_but_uncertainty_gate(self):
-    gate = self.materialize_uncertainty_update_gate()
-    if gate is None:
-      raise RuntimeError('Uncertainty update gate is disabled, cannot freeze around it.')
-    for param in self.parameters():
-      param.requires_grad = False
-    for param in gate.parameters():
-      param.requires_grad = True
-    return gate
-
-  def freeze_all_but_loslite(self):
-    loslite_module = self.materialize_loslite_module()
-    if loslite_module is None:
-      raise RuntimeError('LoS-lite refinement is disabled, cannot freeze around it.')
-    for param in self.parameters():
-      param.requires_grad = False
-    for param in loslite_module.parameters():
-      param.requires_grad = True
-    return loslite_module
-
   def forward(self, image1, image2, iters=12, test_mode=False, low_memory=False, init_disp=None, profile=False, optimize_build_volume='pytorch1'):
     """ Estimate disparity between pair of frames """
-    self._sync_runtime_update_flags()
     B,C,H,W = image1.shape
     low_memory = low_memory or (self.args.get('low_memory', False))
     image1 = normalize_image(image1)
@@ -301,25 +242,17 @@ class FastFoundationStereo(nn.Module):
     coords = torch.arange(w, dtype=torch.float, device=init_disp.device).reshape(1,1,w,1).repeat(b, h, 1, 1)
     disp = init_disp.to(self.dtype)
     disp_preds = []
-    structure_state = None
-    self.last_loslite_regularizer = disp.new_tensor(0.0)
 
     del comb_volume, features_left, features_right, cnet_list
 
     # GRUs iterations to update disparity (1/4 resolution)
     for itr in range(iters):
       disp = disp.detach()
-      if structure_state is not None:
-        structure_state = {k: v.detach() for k, v in structure_state.items()}
       geo_feat = geo_fn(disp, coords, dx=self.dx, low_memory=low_memory)
       with torch.amp.autocast('cuda', enabled=self.args.mixed_precision, dtype=U.AMP_DTYPE):
-        net_list, mask_feat_4, delta_disp, structure_state = self.update_block(
-          net_list, inp_list, geo_feat.to(self.dtype), disp, att, structure_state=structure_state
-        )
+        net_list, mask_feat_4, delta_disp = self.update_block(net_list, inp_list, geo_feat.to(self.dtype), disp, att)
 
       disp = disp + delta_disp.to(self.dtype)
-      if getattr(self.update_block, 'last_loslite_regularizer', None) is not None:
-        self.last_loslite_regularizer = self.last_loslite_regularizer + self.update_block.last_loslite_regularizer.to(self.dtype)
       if test_mode and itr < iters-1:
         continue
 
@@ -331,8 +264,6 @@ class FastFoundationStereo(nn.Module):
     if test_mode:
       return disp_up
 
-    if iters > 0:
-      self.last_loslite_regularizer = self.last_loslite_regularizer / float(iters)
     return init_disp, disp_preds
 
 
@@ -431,17 +362,12 @@ class TrtPostRunner(nn.Module):
     b, c, h, w = features_left[0].shape
     coords = torch.arange(w, dtype=torch.float, device=init_disp.device).reshape(1,1,w,1).repeat(b, h, 1, 1)
     disp = init_disp.to(self.dtype)
-    structure_state = None
 
     # GRUs iterations to update disparity (1/4 resolution)
     for itr in range(self.args.valid_iters):
       disp = disp.detach()
-      if structure_state is not None:
-        structure_state = {k: v.detach() for k, v in structure_state.items()}
       geo_feat = geo_fn(disp, coords, dx=self.dx, low_memory=True)
-      net_list, mask_feat_4, delta_disp, structure_state = self.update_block(
-        net_list, inp_list, geo_feat.to(self.dtype), disp, att, structure_state=structure_state
-      )
+      net_list, mask_feat_4, delta_disp = self.update_block(net_list, inp_list, geo_feat.to(self.dtype), disp, att)
 
       disp = disp + delta_disp.to(self.dtype)
       if itr < self.args.valid_iters-1:

@@ -1,0 +1,76 @@
+project:
+  name: fastfoundation_sceneflow_stage
+  notes:
+    - "SceneFlow protocol template for the unified stereo training script."
+    - "Use this as a starting point; adjust paths and schedules to your local hardware."
+    - "This template currently supports local heldout evaluation only."
+
+model:
+  family: Fast-FoundationStereo
+  model_dir: weights/23-36-37/model_best_bp2_serialize.pth
+  cfg_path: weights/23-36-37/cfg.yaml
+
+data:
+  dataset: sceneflow
+  root: /path/to/SceneFlow
+  train_split: train
+  val_split: test
+  pass_name: finalpass
+  include_driving: true
+  include_monkaa: true
+  scale: 1.0
+
+train:
+  train_scope: all
+  batch_size: 1
+  num_workers: 2
+  epochs: 3
+  grad_clip: 1.0
+  amp_dtype: bf16
+  seed: 0
+  train_iters: 8
+  max_train_batches: null
+  max_val_batches: null
+  sequence_loss_gamma: 0.9
+  freeze_batch_norm: false
+
+loss:
+  name: fast_sequence
+  source: "RAFT/MoCha-style iterative sequence loss adapted to Fast-FoundationStereo's init disparity."
+  init_weight: 1.0
+
+optimizer:
+  name: AdamW
+  lr: 0.0001
+  weight_decay: 0.0
+  eps: 1.0e-06
+
+scheduler:
+  name: OneCycleLR
+  pct_start: 0.01
+  anneal_strategy: linear
+  cycle_momentum: false
+  extra_steps: 100
+
+validation:
+  monitor_every_epoch: true
+  valid_iters: 8
+  benchmark_gt_resolution: full
+  paper_protocol: legacy
+  hiera: 0
+  low_memory: 0
+  max_disp: 416
+  independent_eval_script: scripts/eval_stereo_unified.py
+  notes:
+    - "Current unified training script reports val_epe_monitor for non-Booster datasets."
+    - "Add a dataset-specific independent eval before making claims."
+    - "eval_stereo_unified.py is local heldout eval, not an official benchmark submission path."
+
+logging:
+  log_every: 20
+  save_every: 1
+  save_serialized_model: true
+  export_cfg_for_eval: true
+
+outputs:
+  out_dir: exp_unified_fastfoundation_sceneflow_baseline_v1
